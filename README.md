@@ -1,6 +1,6 @@
 # brevo-proxy
 
-Thin HTTP proxy that receives requests from a Lovable frontend and forwards them to Brevo's transactional email API (`/v3/smtp/email`). The Brevo API key is kept server-side and never exposed to the frontend.
+Thin HTTP proxy that receives requests from a Lovable-generated frontend application and forwards them to Brevo's transactional email API (`/v3/smtp/email`). The Brevo API key is kept server-side and never exposed to the frontend.
 
 ## Setup
 

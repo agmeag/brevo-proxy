@@ -1,7 +1,7 @@
 {
   "name": "brevo-proxy",
   "version": "1.0.0",
-  "description": "Thin HTTP proxy for forwarding Lovable transactional email requests to Brevo",
+  "description": "Thin HTTP proxy for forwarding transactional email requests to Brevo",
   "main": "src/server.js",
   "scripts": {
     "test": "node --test",

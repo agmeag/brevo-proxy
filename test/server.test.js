@@ -10,6 +10,31 @@ async function startServer(server) {
   return `http://127.0.0.1:${address.port}`;
 }
 
+function captureEnv(name) {
+  return Object.prototype.hasOwnProperty.call(process.env, name) ? process.env[name] : undefined;
+}
+
+function restoreEnv(name, value) {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+
+  process.env[name] = value;
+}
+
+function snapshotBrevoEnv() {
+  return {
+    BREVO_API_KEY: captureEnv('BREVO_API_KEY'),
+    BREVO_API_BASE_URL: captureEnv('BREVO_API_BASE_URL'),
+  };
+}
+
+function restoreBrevoEnv(snapshot) {
+  restoreEnv('BREVO_API_KEY', snapshot.BREVO_API_KEY);
+  restoreEnv('BREVO_API_BASE_URL', snapshot.BREVO_API_BASE_URL);
+}
+
 test('forwards transactional email requests to Brevo with api key header', async () => {
   const forwarded = {};
 
@@ -30,8 +55,7 @@ test('forwards transactional email requests to Brevo with api key header', async
 
   const upstreamUrl = await startServer(upstream);
 
-  const originalKey = process.env.BREVO_API_KEY;
-  const originalBaseUrl = process.env.BREVO_API_BASE_URL;
+  const originalEnv = snapshotBrevoEnv();
 
   process.env.BREVO_API_KEY = 'secret-brevo-key';
   process.env.BREVO_API_BASE_URL = `${upstreamUrl}/v3/smtp/email`;
@@ -62,21 +86,11 @@ test('forwards transactional email requests to Brevo with api key header', async
   await new Promise((resolve) => proxy.close(resolve));
   await new Promise((resolve) => upstream.close(resolve));
 
-  if (originalKey === undefined) {
-    delete process.env.BREVO_API_KEY;
-  } else {
-    process.env.BREVO_API_KEY = originalKey;
-  }
-
-  if (originalBaseUrl === undefined) {
-    delete process.env.BREVO_API_BASE_URL;
-  } else {
-    process.env.BREVO_API_BASE_URL = originalBaseUrl;
-  }
+  restoreBrevoEnv(originalEnv);
 });
 
 test('returns 500 when BREVO_API_KEY is missing', async () => {
-  const originalKey = process.env.BREVO_API_KEY;
+  const originalEnv = snapshotBrevoEnv();
   delete process.env.BREVO_API_KEY;
 
   const proxy = createServer();
@@ -93,15 +107,11 @@ test('returns 500 when BREVO_API_KEY is missing', async () => {
 
   await new Promise((resolve) => proxy.close(resolve));
 
-  if (originalKey === undefined) {
-    delete process.env.BREVO_API_KEY;
-  } else {
-    process.env.BREVO_API_KEY = originalKey;
-  }
+  restoreBrevoEnv(originalEnv);
 });
 
 test('returns 400 for invalid JSON body', async () => {
-  const originalKey = process.env.BREVO_API_KEY;
+  const originalEnv = snapshotBrevoEnv();
   process.env.BREVO_API_KEY = 'configured-key';
 
   const proxy = createServer();
@@ -118,9 +128,5 @@ test('returns 400 for invalid JSON body', async () => {
 
   await new Promise((resolve) => proxy.close(resolve));
 
-  if (originalKey === undefined) {
-    delete process.env.BREVO_API_KEY;
-  } else {
-    process.env.BREVO_API_KEY = originalKey;
-  }
+  restoreBrevoEnv(originalEnv);
 });
