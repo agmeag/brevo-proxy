@@ -4,6 +4,72 @@ import { pathToFileURL } from 'node:url';
 const DEFAULT_BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
 const MAX_BODY_SIZE_BYTES = 1024 * 1024;
 
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX ?? 20);
+
+// After this many rate-limit violations within the window the IP is blacklisted
+const BLACKLIST_THRESHOLD = Number(process.env.BLACKLIST_THRESHOLD ?? 5);
+const BLACKLIST_DURATION_MS = Number(process.env.BLACKLIST_DURATION_MS ?? 10 * 60_000); // 10 min
+
+// Max simultaneous open connections before new ones are dropped
+const MAX_CONNECTIONS = Number(process.env.MAX_CONNECTIONS ?? 100);
+
+// How long a client has to send the request headers (slow-loris defence)
+const HEADERS_TIMEOUT_MS = Number(process.env.HEADERS_TIMEOUT_MS ?? 5_000);
+
+// Drop idle keep-alive connections after this many ms
+const KEEP_ALIVE_TIMEOUT_MS = Number(process.env.KEEP_ALIVE_TIMEOUT_MS ?? 30_000);
+
+const rateLimitMap = new Map();  // ip → { windowStart, count, violations }
+const blacklistMap = new Map();  // ip → expiresAt
+
+function getIp(request) {
+  return request.headers['x-forwarded-for']?.split(',')[0].trim() ?? request.socket.remoteAddress;
+}
+
+function isBlacklisted(ip) {
+  const expiresAt = blacklistMap.get(ip);
+  if (!expiresAt) return false;
+  if (Date.now() >= expiresAt) {
+    blacklistMap.delete(ip);
+    return false;
+  }
+  return true;
+}
+
+function isRateLimited(ip) {
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip);
+
+  if (!entry || now - entry.windowStart >= RATE_LIMIT_WINDOW_MS) {
+    rateLimitMap.set(ip, { windowStart: now, count: 1, violations: entry?.violations ?? 0 });
+    return false;
+  }
+
+  if (entry.count >= RATE_LIMIT_MAX) {
+    entry.violations++;
+    if (entry.violations >= BLACKLIST_THRESHOLD) {
+      blacklistMap.set(ip, now + BLACKLIST_DURATION_MS);
+      rateLimitMap.delete(ip);
+    }
+    return true;
+  }
+
+  entry.count++;
+  return false;
+}
+
+// Prune expired entries every minute to prevent unbounded memory growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of rateLimitMap) {
+    if (now - entry.windowStart >= RATE_LIMIT_WINDOW_MS) rateLimitMap.delete(ip);
+  }
+  for (const [ip, expiresAt] of blacklistMap) {
+    if (now >= expiresAt) blacklistMap.delete(ip);
+  }
+}, RATE_LIMIT_WINDOW_MS).unref();
+
 function writeCorsHeaders(response) {
   response.setHeader('Access-Control-Allow-Origin', process.env.CORS_ALLOW_ORIGIN || '*');
   response.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
@@ -40,12 +106,23 @@ function send(response, status, body) {
 }
 
 export function createServer() {
-  return createHttpServer(async (request, response) => {
+  const server = createHttpServer(async (request, response) => {
     writeCorsHeaders(response);
 
     if (request.method === 'OPTIONS') {
       response.writeHead(204);
       response.end();
+      return;
+    }
+
+    // Block blacklisted IPs and rate-limited IPs before doing any other work
+    const ip = getIp(request);
+    if (isBlacklisted(ip)) {
+      send(response, 403, { error: 'Forbidden' });
+      return;
+    }
+    if (isRateLimited(ip)) {
+      send(response, 429, { error: 'Too many requests, slow down' });
       return;
     }
 
@@ -122,6 +199,12 @@ export function createServer() {
       clearTimeout(timeout);
     }
   });
+
+  server.maxConnections = MAX_CONNECTIONS;
+  server.headersTimeout = HEADERS_TIMEOUT_MS;
+  server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
+
+  return server;
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
