@@ -33,6 +33,12 @@ function readRequestBody(request) {
   });
 }
 
+function send(response, status, body) {
+  const payload = JSON.stringify(body);
+  response.writeHead(status, { 'Content-Type': 'application/json' });
+  response.end(payload);
+}
+
 export function createServer() {
   return createHttpServer(async (request, response) => {
     writeCorsHeaders(response);
@@ -43,30 +49,37 @@ export function createServer() {
       return;
     }
 
+    // Auth — only enforced when PROXY_SECRET is configured
+    const proxySecret = process.env.PROXY_SECRET;
+    if (proxySecret) {
+      const key = request.headers['x-proxy-key'];
+      if (!key || key !== proxySecret) {
+        send(response, 401, { error: 'Unauthorized' });
+        return;
+      }
+    }
+
     if (request.url !== '/send-transactional-email') {
-      response.writeHead(404, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify({ error: 'Not found' }));
+      send(response, 404, { error: 'Not found' });
       return;
     }
 
     if (request.method !== 'POST') {
-      response.writeHead(405, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify({ error: 'Method not allowed' }));
+      send(response, 405, { error: 'Method not allowed' });
       return;
     }
 
     if (!process.env.BREVO_API_KEY) {
-      response.writeHead(500, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify({ error: 'Proxy is not configured' }));
+      send(response, 500, { error: 'Proxy is not configured' });
       return;
     }
 
     let bodyText;
     try {
       bodyText = await readRequestBody(request);
-    } catch {
-      response.writeHead(413, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify({ error: 'Request payload too large' }));
+    } catch (err) {
+      const tooLarge = err.message === 'Request body too large';
+      send(response, tooLarge ? 413 : 400, { error: tooLarge ? 'Request payload too large' : 'Failed to read request body' });
       return;
     }
 
@@ -74,14 +87,17 @@ export function createServer() {
     try {
       payload = JSON.parse(bodyText);
     } catch {
-      response.writeHead(400, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify({ error: 'Invalid JSON payload' }));
+      send(response, 400, { error: 'Invalid JSON payload' });
       return;
     }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
 
     try {
       const brevoResponse = await fetch(process.env.BREVO_API_BASE_URL || DEFAULT_BREVO_API_URL, {
         method: 'POST',
+        signal: controller.signal,
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
@@ -95,9 +111,15 @@ export function createServer() {
         'Content-Type': brevoResponse.headers.get('content-type') || 'application/json',
       });
       response.end(responseBody);
-    } catch {
-      response.writeHead(502, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify({ error: 'Unable to reach Brevo API' }));
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        send(response, 504, { error: 'Brevo did not respond in time' });
+        return;
+      }
+      console.error('Brevo unreachable:', err.message);
+      send(response, 502, { error: 'Unable to reach Brevo API' });
+    } finally {
+      clearTimeout(timeout);
     }
   });
 }
