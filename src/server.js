@@ -1,4 +1,5 @@
-const http = require('node:http');
+import { createServer as createHttpServer } from 'node:http';
+import { pathToFileURL } from 'node:url';
 
 const DEFAULT_BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
 const MAX_BODY_SIZE_BYTES = 1024 * 1024;
@@ -32,8 +33,8 @@ function readRequestBody(request) {
   });
 }
 
-function createServer() {
-  return http.createServer(async (request, response) => {
+export function createServer() {
+  return createHttpServer(async (request, response) => {
     writeCorsHeaders(response);
 
     if (request.method === 'OPTIONS') {
@@ -63,7 +64,7 @@ function createServer() {
     let bodyText;
     try {
       bodyText = await readRequestBody(request);
-    } catch (error) {
+    } catch {
       response.writeHead(413, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify({ error: 'Request payload too large' }));
       return;
@@ -101,14 +102,12 @@ function createServer() {
   });
 }
 
-if (require.main === module) {
-  const port = Number(process.env.PORT || 3000);
-  const server = createServer();
-  server.listen(port, () => {
-    process.stdout.write(`brevo-proxy listening on port ${port}\n`);
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const { default: dotenv } = await import('dotenv');
+  dotenv.config();
+
+  const PORT = Number(process.env.PORT || 3000);
+  createServer().listen(PORT, () => {
+    console.log(`brevo-proxy listening on port ${PORT}`);
   });
 }
-
-module.exports = {
-  createServer,
-};

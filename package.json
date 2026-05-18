@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "type": "module",
   "description": "Thin HTTP proxy that forwards requests to Brevo's transactional email API",
-  "main": "server.js",
+  "main": "src/server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/server.test.js"
   },
   "dependencies": {
     "dotenv": "17.4.2",

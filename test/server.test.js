@@ -1,8 +1,8 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const http = require('node:http');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
 
-const { createServer } = require('../src/server');
+import { createServer } from '../src/server.js';
 
 async function startServer(server) {
   await new Promise((resolve) => server.listen(0, resolve));
