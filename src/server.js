@@ -115,6 +115,12 @@ export function createServer() {
       return;
     }
 
+    // Health endpoint — no auth required
+    if (request.url === '/health' && request.method === 'GET') {
+      send(response, 200, { status: 'ok' });
+      return;
+    }
+
     // Block blacklisted IPs and rate-limited IPs before doing any other work
     const ip = getIp(request);
     if (isBlacklisted(ip)) {
