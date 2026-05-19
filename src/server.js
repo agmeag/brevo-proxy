@@ -208,8 +208,11 @@ export function createServer() {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const { default: dotenv } = await import('dotenv');
-  dotenv.config();
+  // Load .env only for local development — in production (Coolify) vars are injected by the runtime
+  if (process.env.NODE_ENV !== 'production') {
+    const { default: dotenv } = await import('dotenv');
+    dotenv.config();
+  }
 
   const PORT = Number(process.env.PORT || 3000);
   createServer().listen(PORT, () => {
