@@ -1,7 +1,13 @@
+networks:
+  coolify:
+    external: true
+
 services:
   brevo-proxy:
     build: .
     env_file: .env
+    networks:
+      - coolify
     ports:
       - "${PORT:-3000}:${PORT:-3000}"
     restart: unless-stopped
